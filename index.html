@@ -816,7 +816,7 @@
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' })
+        body: JSON.stringify({ chat_id: chatId, text })
       });
       if (!res.ok) {
         const err = await res.json();
@@ -862,18 +862,19 @@
     //  DEPOSITS
     // ═══════════════════════════════════════════════
     async function loadDeposits() {
-      const snap = await db.ref('deposits').once('value');
-      const deposits = [];
-      snap.forEach(c => deposits.push({ id: c.key, ...c.val() }));
-      allDepositsCache = deposits;
+      try {
+        const snap = await db.ref('deposits').once('value');
+        const deposits = [];
+        snap.forEach(c => deposits.push({ id: c.key, ...c.val() }));
+        allDepositsCache = deposits;
 
-      const pending = deposits.filter(d => d.status === 'PENDING');
-      document.getElementById('depositCount').textContent = pending.length;
+        const pending = deposits.filter(d => d.status === 'PENDING');
+        document.getElementById('depositCount').textContent = pending.length;
 
-      const tbody = document.getElementById('depositTable');
-      if (!pending.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="empty">No pending deposits</td></tr>';
-      } else {
+        const tbody = document.getElementById('depositTable');
+        if (!pending.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="empty">No pending deposits</td></tr>';
+        } else {
         tbody.innerHTML = pending.map(d => `
           <tr>
             <td><a class="user-link" onclick="selectUserById('${d.telegramId}')">${d.telegramId}</a></td>
@@ -899,6 +900,10 @@
           <td class="text-muted">${d.createdAt ? new Date(d.createdAt).toLocaleDateString() : '-'}</td>
         </tr>
       `).join('');
+      } catch (e) {
+        document.getElementById('depositTable').innerHTML = '<tr><td colspan="5" class="empty">Error: ' + e.message + '</td></tr>';
+        console.error('loadDeposits error:', e);
+      }
     }
 
     async function approveDeposit(id) {
@@ -940,42 +945,47 @@
     //  WITHDRAWS
     // ═══════════════════════════════════════════════
     async function loadWithdraws() {
-      const snap = await db.ref('withdraws').once('value');
-      const withdraws = [];
-      snap.forEach(c => withdraws.push({ id: c.key, ...c.val() }));
-      allWithdrawsCache = withdraws;
+      try {
+        const snap = await db.ref('withdraws').once('value');
+        const withdraws = [];
+        snap.forEach(c => withdraws.push({ id: c.key, ...c.val() }));
+        allWithdrawsCache = withdraws;
 
-      const pending = withdraws.filter(w => w.status === 'PENDING');
-      document.getElementById('withdrawCount').textContent = pending.length;
+        const pending = withdraws.filter(w => w.status === 'PENDING');
+        document.getElementById('withdrawCount').textContent = pending.length;
 
-      const tbody = document.getElementById('withdrawTable');
-      if (!pending.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="empty">No pending withdraws</td></tr>';
-      } else {
-        tbody.innerHTML = pending.map(w => `
+        const tbody = document.getElementById('withdrawTable');
+        if (!pending.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="empty">No pending withdraws</td></tr>';
+        } else {
+          tbody.innerHTML = pending.map(w => `
+            <tr>
+              <td><a class="user-link" onclick="selectUserById('${w.telegramId}')">${w.telegramId}</a></td>
+              <td class="text-red" style="font-weight:600">-${w.amount}</td>
+              <td>${w.username || '-'}</td>
+              <td class="text-muted">${w.createdAt ? new Date(w.createdAt).toLocaleDateString() : '-'}</td>
+              <td>
+                <button class="btn-sm approve" onclick="approveWithdraw('${w.id}')">Approve</button>
+                <button class="btn-sm reject" onclick="rejectWithdraw('${w.id}')">Reject</button>
+              </td>
+            </tr>
+          `).join('');
+        }
+
+        const allTbody = document.getElementById('allWithdrawTable');
+        const sorted = [...withdraws].reverse();
+        allTbody.innerHTML = sorted.map(w => `
           <tr>
             <td><a class="user-link" onclick="selectUserById('${w.telegramId}')">${w.telegramId}</a></td>
-            <td class="text-red" style="font-weight:600">-${w.amount}</td>
-            <td>${w.username || '-'}</td>
+            <td class="text-red" style="font-weight:600">${w.amount}</td>
+            <td><span class="status ${(w.status||'PENDING').toLowerCase()}">${w.status || 'PENDING'}</span></td>
             <td class="text-muted">${w.createdAt ? new Date(w.createdAt).toLocaleDateString() : '-'}</td>
-            <td>
-              <button class="btn-sm approve" onclick="approveWithdraw('${w.id}')">Approve</button>
-              <button class="btn-sm reject" onclick="rejectWithdraw('${w.id}')">Reject</button>
-            </td>
           </tr>
         `).join('');
+      } catch (e) {
+        document.getElementById('withdrawTable').innerHTML = '<tr><td colspan="5" class="empty">Error: ' + e.message + '</td></tr>';
+        console.error('loadWithdraws error:', e);
       }
-
-      const allTbody = document.getElementById('allWithdrawTable');
-      const sorted = [...withdraws].reverse();
-      allTbody.innerHTML = sorted.map(w => `
-        <tr>
-          <td><a class="user-link" onclick="selectUserById('${w.telegramId}')">${w.telegramId}</a></td>
-          <td class="text-red" style="font-weight:600">${w.amount}</td>
-          <td><span class="status ${(w.status||'PENDING').toLowerCase()}">${w.status || 'PENDING'}</span></td>
-          <td class="text-muted">${w.createdAt ? new Date(w.createdAt).toLocaleDateString() : '-'}</td>
-        </tr>
-      `).join('');
     }
 
     async function approveWithdraw(id) {
@@ -1014,10 +1024,15 @@
     //  USERS
     // ═══════════════════════════════════════════════
     async function loadUsers() {
-      const snap = await db.ref('users').once('value');
-      allUsers = [];
-      snap.forEach(c => allUsers.push({ telegramId: Number(c.key), ...c.val() }));
-      renderUsers(allUsers);
+      try {
+        const snap = await db.ref('users').once('value');
+        allUsers = [];
+        snap.forEach(c => allUsers.push({ telegramId: Number(c.key), ...c.val() }));
+        renderUsers(allUsers);
+      } catch (e) {
+        document.getElementById('userTable').innerHTML = '<tr><td colspan="7" class="empty">Error: ' + e.message + '</td></tr>';
+        console.error('loadUsers error:', e);
+      }
     }
 
     function renderUsers(users) {
