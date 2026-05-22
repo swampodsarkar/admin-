@@ -6,13 +6,7 @@
   <title>Bet Score - Admin Panel</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <!-- Firebase v9 compat (works like v8) -->
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js">
-  </script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js">
-  </script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js">
-  </script>
+
   <style>
     * {
       margin: 0;
@@ -573,10 +567,10 @@
   <div class="login-page" id="loginPage">
     <div class="login-card">
       <h1>⚽ Admin Panel</h1>
-      <p>Sign in to manage your bot</p>
-      <input type="email" id="loginEmail" placeholder="Email" value="mdswampodsarkar007@gmail.com">
-      <input type="password" id="loginPass" placeholder="Password" value="123456">
+      <p>Enter admin password</p>
+      <input type="password" id="loginPass" placeholder="Password" autofocus>
       <button onclick="handleLogin()">Sign In</button>
+      <div style="margin-top:8px;font-size:12px;color:#666">Default password: 123456</div>
       <div class="login-error" id="loginError"></div>
     </div>
   </div>
@@ -717,65 +711,47 @@
     // ═══════════════════════════════════════════════
     const BOT_TOKEN = '8707715962:AAGSm825MM6hg4ZO1nWgAQ6m0lwC8vYz21M'; // ← your bot token
 
-    const firebaseConfig = {
-      apiKey: "AIzaSyDtq1vLVZ9D3CBis6FFSpt8psERGyTG6YM",
-      authDomain: "gen-z-airdrop.firebaseapp.com",
-      databaseURL: "https://gen-z-airdrop-default-rtdb.asia-southeast1.firebasedatabase.app",
-      projectId: "gen-z-airdrop",
-      storageBucket: "gen-z-airdrop.firebasestorage.app",
-      messagingSenderId: "1056087088959",
-      appId: "1:1056087088959:web:2d15418429c2f378f2bd8a",
-      measurementId: "G-CKB3HP9D31"
-    };
+    const DB_URL = 'https://gen-z-airdrop-default-rtdb.asia-southeast1.firebasedatabase.app';
 
-    // ═══════════════════════════════════════════════
-    //  FIREBASE INIT
-    // ═══════════════════════════════════════════════
-    firebase.initializeApp(firebaseConfig);
-    const auth = firebase.auth();
-    const db = firebase.database();
+    // Firebase REST API helpers (no SDK needed, avoids CSP eval blocks)
+    async function dbGet(path) { const r = await fetch(`${DB_URL}/${path}.json`); return r.json(); }
+    async function dbSet(path, data) { await fetch(`${DB_URL}/${path}.json`, { method: 'PUT', body: JSON.stringify(data) }); }
+    async function dbUpdate(path, data) { await fetch(`${DB_URL}/${path}.json`, { method: 'PATCH', body: JSON.stringify(data) }); }
+    async function dbPush(path, data) { const r = await fetch(`${DB_URL}/${path}.json`, { method: 'POST', body: JSON.stringify(data) }); return r.json(); }
+    async function dbDel(path) { await fetch(`${DB_URL}/${path}.json`, { method: 'DELETE' }); }
 
     // ═══════════════════════════════════════════════
     //  STATE
     // ═══════════════════════════════════════════════
-    let currentUser = null;
+    let loggedIn = false;
     let allUsers = [];
     let selectedUserId = null;
     let allDepositsCache = [];
     let allWithdrawsCache = [];
 
     // ═══════════════════════════════════════════════
-    //  AUTH
+    //  AUTH — simple password (Firebase Auth not used, avoid CSP eval)
     // ═══════════════════════════════════════════════
-    auth.onAuthStateChanged(user => {
-      if (user) {
-        currentUser = user;
-        document.getElementById('loginPage').style.display = 'none';
-        document.getElementById('app').classList.add('show');
-        document.getElementById('adminEmail').textContent = user.email;
-        refreshData();
-      } else {
-        currentUser = null;
-        document.getElementById('loginPage').style.display = 'flex';
-        document.getElementById('app').classList.remove('show');
-      }
-    });
-
-    async function handleLogin() {
-      const email = document.getElementById('loginEmail').value.trim();
+    function handleLogin() {
       const pass = document.getElementById('loginPass').value;
       const errEl = document.getElementById('loginError');
       errEl.style.display = 'none';
-      try {
-        await auth.signInWithEmailAndPassword(email, pass);
-      } catch (e) {
-        errEl.textContent = e.message;
+      if (pass === '123456') {
+        loggedIn = true;
+        document.getElementById('loginPage').style.display = 'none';
+        document.getElementById('app').classList.add('show');
+        document.getElementById('adminEmail').textContent = 'admin';
+        refreshData();
+      } else {
+        errEl.textContent = 'Wrong password';
         errEl.style.display = 'block';
       }
     }
 
     function handleLogout() {
-      auth.signOut();
+      loggedIn = false;
+      document.getElementById('loginPage').style.display = 'flex';
+      document.getElementById('app').classList.remove('show');
     }
 
     // ═══════════════════════════════════════════════
@@ -830,23 +806,19 @@
     // ═══════════════════════════════════════════════
     async function refreshData() {
       try {
-        const [usersSnap, betsSnap, depositsSnap, withdrawsSnap] = await Promise.all([
-          db.ref('users').once('value'),
-          db.ref('bets').once('value'),
-          db.ref('deposits').once('value'),
-          db.ref('withdraws').once('value')
+        const [usersData, betsData, depositsData, withdrawsData] = await Promise.all([
+          dbGet('users'), dbGet('bets'), dbGet('deposits'), dbGet('withdraws')
         ]);
 
-        const users = [];
-        usersSnap.forEach(c => users.push(c.val()));
+        const users = Object.values(usersData || {});
         const totalUsers = users.length;
         const totalCoins = users.reduce((s, u) => s + (u.balance || 0), 0);
-        const totalBets = betsSnap.numChildren();
+        const totalBets = Object.keys(betsData || {}).length;
 
         let pendingDep = 0;
-        depositsSnap.forEach(c => { if (c.val().status === 'PENDING') pendingDep++; });
+        Object.values(depositsData || {}).forEach(d => { if (d.status === 'PENDING') pendingDep++; });
         let pendingWdr = 0;
-        withdrawsSnap.forEach(c => { if (c.val().status === 'PENDING') pendingWdr++; });
+        Object.values(withdrawsData || {}).forEach(w => { if (w.status === 'PENDING') pendingWdr++; });
 
         document.getElementById('statUsers').textContent = totalUsers;
         document.getElementById('statBets').textContent = totalBets;
@@ -863,9 +835,8 @@
     // ═══════════════════════════════════════════════
     async function loadDeposits() {
       try {
-        const snap = await db.ref('deposits').once('value');
-        const deposits = [];
-        snap.forEach(c => deposits.push({ id: c.key, ...c.val() }));
+        const data = await dbGet('deposits');
+        const deposits = Object.entries(data || {}).map(([id, val]) => ({ id, ...val }));
         allDepositsCache = deposits;
 
         const pending = deposits.filter(d => d.status === 'PENDING');
@@ -910,13 +881,12 @@
       const deposit = allDepositsCache.find(d => d.id === id);
       if (!deposit) return;
       try {
-        const userSnap = await db.ref(`users/${deposit.telegramId}`).once('value');
-        const user = userSnap.val();
+        const user = await dbGet(`users/${deposit.telegramId}`);
         if (!user) { showToast('User not found', 'error'); return; }
         const newBal = (user.balance || 0) + deposit.amount;
-        await db.ref(`users/${deposit.telegramId}/balance`).set(newBal);
-        await db.ref(`users/${deposit.telegramId}/totalDeposited`).set((user.totalDeposited || 0) + deposit.amount);
-        await db.ref(`deposits/${id}`).update({ status: 'APPROVED', processedAt: new Date().toISOString() });
+        await dbSet(`users/${deposit.telegramId}/balance`, newBal);
+        await dbSet(`users/${deposit.telegramId}/totalDeposited`, (user.totalDeposited || 0) + deposit.amount);
+        await dbUpdate(`deposits/${id}`, { status: 'APPROVED', processedAt: new Date().toISOString() });
 
         const msg = `🎉 Your deposit of *${deposit.amount} coins* has been approved!\n\nNew balance: ${newBal} coins`;
         sendTelegramMessage(deposit.telegramId, msg).catch(() => {});
@@ -932,7 +902,7 @@
       const deposit = allDepositsCache.find(d => d.id === id);
       if (!deposit) return;
       try {
-        await db.ref(`deposits/${id}`).update({ status: 'REJECTED', processedAt: new Date().toISOString() });
+        await dbUpdate(`deposits/${id}`, { status: 'REJECTED', processedAt: new Date().toISOString() });
         const msg = `❌ Your deposit request (TXID: ${deposit.txid}) was rejected. Contact admin if this is a mistake.`;
         sendTelegramMessage(deposit.telegramId, msg).catch(() => {});
         showToast('Deposit rejected');
@@ -946,9 +916,8 @@
     // ═══════════════════════════════════════════════
     async function loadWithdraws() {
       try {
-        const snap = await db.ref('withdraws').once('value');
-        const withdraws = [];
-        snap.forEach(c => withdraws.push({ id: c.key, ...c.val() }));
+        const data = await dbGet('withdraws');
+        const withdraws = Object.entries(data || {}).map(([id, val]) => ({ id, ...val }));
         allWithdrawsCache = withdraws;
 
         const pending = withdraws.filter(w => w.status === 'PENDING');
@@ -993,7 +962,7 @@
       const w = allWithdrawsCache.find(x => x.id === id);
       if (!w) return;
       try {
-        await db.ref(`withdraws/${id}`).update({ status: 'APPROVED', approvedBy: 0, processedAt: new Date().toISOString() });
+        await dbUpdate(`withdraws/${id}`, { status: 'APPROVED', approvedBy: 0, processedAt: new Date().toISOString() });
         const msg = `✅ Your withdraw of *${w.amount} coins* has been approved and processed!`;
         sendTelegramMessage(w.telegramId, msg).catch(() => {});
         showToast('Withdraw approved!');
@@ -1007,11 +976,10 @@
       const w = allWithdrawsCache.find(x => x.id === id);
       if (!w) return;
       try {
-        const userSnap = await db.ref(`users/${w.telegramId}`).once('value');
-        const user = userSnap.val();
+        const user = await dbGet(`users/${w.telegramId}`);
         const refunded = (user?.balance || 0) + w.amount;
-        await db.ref(`users/${w.telegramId}/balance`).set(refunded);
-        await db.ref(`withdraws/${id}`).update({ status: 'REJECTED', processedAt: new Date().toISOString() });
+        await dbSet(`users/${w.telegramId}/balance`, refunded);
+        await dbUpdate(`withdraws/${id}`, { status: 'REJECTED', processedAt: new Date().toISOString() });
         const msg = `❌ Your withdraw of *${w.amount} coins* was rejected. Amount refunded to your balance.`;
         sendTelegramMessage(w.telegramId, msg).catch(() => {});
         showToast('Withdraw rejected, coins refunded');
@@ -1025,9 +993,8 @@
     // ═══════════════════════════════════════════════
     async function loadUsers() {
       try {
-        const snap = await db.ref('users').once('value');
-        allUsers = [];
-        snap.forEach(c => allUsers.push({ telegramId: Number(c.key), ...c.val() }));
+        const data = await dbGet('users');
+        allUsers = Object.entries(data || {}).map(([key, val]) => ({ telegramId: Number(key), ...val }));
         renderUsers(allUsers);
       } catch (e) {
         document.getElementById('userTable').innerHTML = '<tr><td colspan="7" class="empty">Error: ' + e.message + '</td></tr>';
@@ -1091,11 +1058,10 @@
       const amount = parseInt(document.getElementById('manageAmount').value);
       if (!amount || amount < 1) { showToast('Enter a valid amount', 'error'); return; }
       try {
-        const snap = await db.ref(`users/${selectedUserId}`).once('value');
-        const user = snap.val();
+        const user = await dbGet(`users/${selectedUserId}`);
         if (!user) { showToast('User not found', 'error'); return; }
         const newBal = (user.balance || 0) + amount;
-        await db.ref(`users/${selectedUserId}/balance`).set(newBal);
+        await dbSet(`users/${selectedUserId}/balance`, newBal);
         const msg = `💰 Admin added *${amount} coins* to your account.\nNew balance: *${newBal} coins*`;
         sendTelegramMessage(selectedUserId, msg).catch(() => {});
         showToast(`Added ${amount} coins!`);
@@ -1110,11 +1076,10 @@
       if (!amount || amount < 1) { showToast('Enter a valid amount', 'error'); return; }
       if (!confirm(`Deduct ${amount} coins from this user?`)) return;
       try {
-        const snap = await db.ref(`users/${selectedUserId}`).once('value');
-        const user = snap.val();
+        const user = await dbGet(`users/${selectedUserId}`);
         if (!user) { showToast('User not found', 'error'); return; }
         const newBal = Math.max(0, (user.balance || 0) - amount);
-        await db.ref(`users/${selectedUserId}/balance`).set(newBal);
+        await dbSet(`users/${selectedUserId}/balance`, newBal);
         const msg = `⚠️ Admin deducted *${amount} coins* from your account.\nNew balance: *${newBal} coins*`;
         sendTelegramMessage(selectedUserId, msg).catch(() => {});
         showToast(`Deducted ${amount} coins!`);
@@ -1127,7 +1092,7 @@
     async function handleBanUser() {
       if (!confirm('Ban this user?')) return;
       try {
-        await db.ref(`users/${selectedUserId}/banned`).set(true);
+        await dbSet(`users/${selectedUserId}/banned`, true);
         sendTelegramMessage(selectedUserId, '🚫 You have been banned from Football Coin Predictor. Contact admin for details.').catch(() => {});
         showToast('User banned!');
         loadUsers();
@@ -1138,7 +1103,7 @@
     async function handleUnbanUser() {
       if (!confirm('Unban this user?')) return;
       try {
-        await db.ref(`users/${selectedUserId}/banned`).set(false);
+        await dbSet(`users/${selectedUserId}/banned`, false);
         sendTelegramMessage(selectedUserId, '✅ You have been unbanned. You can use the bot again!').catch(() => {});
         showToast('User unbanned!');
         loadUsers();
